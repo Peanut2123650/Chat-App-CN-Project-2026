@@ -1,6 +1,7 @@
 import socket
 import threading
 import sys
+from datetime import datetime
 
 HOST = '127.0.0.1'
 PORT = 12345
@@ -46,13 +47,22 @@ def receive():
             message = client.recv(1024).decode()
             if message == "USERNAME":
                 client.send(username.encode())
+            elif message == "Disconnecting...":
+                with input_lock:
+                    sys.stdout.write("\r" + " " * (len("You: ") + len(current_input)) + "\r")
+                    print(message)
+                stop_event.set()
+            elif message.startswith("Username already taken"):
+                print(f"\n{message}")
+                stop_event.set()
             else:
                 with input_lock:
                     sys.stdout.write("\r" + " " * (len("You: ") + len(current_input)) + "\r")
                     print(message)
                     reprint_input()
         except:
-            print("\nDisconnected from server.")
+            if not stop_event.is_set():
+                print("\nDisconnected from server.")
             stop_event.set()
 
 
@@ -72,10 +82,14 @@ def write():
                 if message.strip():
                     try:
                         client.send(message.encode())
+                        if not message.strip().startswith("/"):
+                            time = datetime.now().strftime("%H:%M")
+                            print(f"[{time}] You: {message}")
                     except:
                         stop_event.set()
                         break
-                reprint_input()
+                if not stop_event.is_set():
+                    reprint_input()
             elif char in ("\x08", "\x7f"):  # backspace
                 if current_input:
                     current_input = current_input[:-1]
