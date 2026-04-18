@@ -1,5 +1,6 @@
 import socket
 import threading
+import sys
 
 HOST = '127.0.0.1'
 PORT = 12345
@@ -9,32 +10,88 @@ client.connect((HOST, PORT))
 
 username = input("Enter your username: ")
 
+current_input = ""
+input_lock = threading.Lock()
+stop_event = threading.Event()
+
+# ── platform setup ──────────────────────────────────────────
+if sys.platform == "win32":
+    import msvcrt
+
+    def read_char():
+        return msvcrt.getwch()
+
+else:
+    import tty, termios
+
+    def read_char():
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            return sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+# ────────────────────────────────────────────────────────────
+
+
+def reprint_input():
+    sys.stdout.write(f"You: {current_input}")
+    sys.stdout.flush()
+
 
 def receive():
-    while True:
+    while not stop_event.is_set():
         try:
             message = client.recv(1024).decode()
-
             if message == "USERNAME":
                 client.send(username.encode())
             else:
-                print(message)
-
+                with input_lock:
+                    sys.stdout.write("\r" + " " * (len("You: ") + len(current_input)) + "\r")
+                    print(message)
+                    reprint_input()
         except:
-            print("Disconnected from server")
-            client.close()
-            break
+            print("\nDisconnected from server.")
+            stop_event.set()
 
 
 def write():
-    while True:
-        try:
-            message = input("You: ")
-            client.send(message.encode())
-        except:
-            break
+    global current_input
+    sys.stdout.write("You: ")
+    sys.stdout.flush()
+
+    while not stop_event.is_set():
+        char = read_char()
+
+        with input_lock:
+            if char in ("\r", "\n"):
+                message = current_input
+                current_input = ""
+                print()
+                if message.strip():
+                    try:
+                        client.send(message.encode())
+                    except:
+                        stop_event.set()
+                        break
+                reprint_input()
+            elif char in ("\x08", "\x7f"):  # backspace
+                if current_input:
+                    current_input = current_input[:-1]
+                    sys.stdout.write("\b \b")
+                    sys.stdout.flush()
+            elif char == "\x03":  # Ctrl+C
+                stop_event.set()
+                break
+            else:
+                current_input += char
+                sys.stdout.write(char)
+                sys.stdout.flush()
+
+    client.close()
+    sys.exit(0)
 
 
-# Start both threads
-threading.Thread(target=receive).start()
-threading.Thread(target=write).start()
+threading.Thread(target=receive, daemon=True).start()
+write()

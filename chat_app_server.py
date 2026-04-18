@@ -32,8 +32,35 @@ def handle_client(client, username):
             if not message:
                 break
 
-            print(f"{username}: {message}")
-            broadcast(f"{username}: {message}", client)
+            # 🔥 PRIVATE MESSAGE
+            if message.startswith("/msg"):
+                parts = message.split(" ", 2)
+
+                if len(parts) < 3:
+                    client.send("Invalid format. Use: /msg username message".encode())
+                    continue
+
+                target_user = parts[1]
+                private_msg = parts[2]
+
+                if target_user in clients:
+                    # send to receiver
+                    clients[target_user].send(
+                        f"[Private] {username}: {private_msg}".encode()
+                    )
+
+                    # send confirmation to sender
+                    client.send(
+                        f"[Private to {target_user}]: {private_msg}".encode()
+                    )
+                else:
+                    client.send("User not found".encode())
+
+            # 🔹 NORMAL MESSAGE
+            else:
+                formatted = f"{username}: {message}"
+                print(formatted)
+                broadcast(formatted, client)
 
         except:
             break
@@ -49,15 +76,14 @@ def handle_client(client, username):
 while True:
     client, address = server.accept()
 
-    # Ask for username
     client.send("USERNAME".encode())
     username = client.recv(1024).decode()
 
     clients[username] = client
 
-    print(f"{username} joined the chat")
-
-    broadcast(f"{username} joined the chat")
+    join_msg = f"{username} joined the chat"
+    print(join_msg)
+    broadcast(join_msg)
 
     thread = threading.Thread(target=handle_client, args=(client, username))
     thread.start()
