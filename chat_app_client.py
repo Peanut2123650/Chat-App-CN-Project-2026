@@ -9,8 +9,6 @@ PORT = 12345
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client.connect((HOST, PORT))
 
-username = input("Enter your username: ")
-
 current_input = ""
 input_lock = threading.Lock()
 stop_event = threading.Event()
@@ -41,19 +39,32 @@ def reprint_input():
     sys.stdout.flush()
 
 
+# ── username handshake (runs before threads start) ──────────
+username = None
+while True:
+    prompt = client.recv(1024).decode()
+    if prompt == "USERNAME":
+        username = input("Enter your username: ").strip()
+        client.send(username.encode())
+    elif prompt.startswith("USERNAME_ERR:"):
+        error_msg = prompt[len("USERNAME_ERR:"):]
+        print(f"Error: {error_msg} Please try again.")
+    else:
+        # first non-handshake message means we're accepted
+        # (the join broadcast to others — just break out)
+        break
+# ────────────────────────────────────────────────────────────
+
+print("Connected! Type /help to see available commands.")
+
 def receive():
     while not stop_event.is_set():
         try:
             message = client.recv(1024).decode()
-            if message == "USERNAME":
-                client.send(username.encode())
-            elif message == "Disconnecting...":
+            if message == "Disconnecting...":
                 with input_lock:
                     sys.stdout.write("\r" + " " * (len("You: ") + len(current_input)) + "\r")
                     print(message)
-                stop_event.set()
-            elif message.startswith("Username already taken"):
-                print(f"\n{message}")
                 stop_event.set()
             else:
                 with input_lock:

@@ -27,6 +27,20 @@ def broadcast(message, sender_client=None):
                 pass
 
 
+def validate_username(username):
+    """Returns an error string if invalid, None if valid."""
+    if not username:
+        return "USERNAME_ERR:Username cannot be empty."
+    if len(username) > 20:
+        return "USERNAME_ERR:Username too long (max 20 characters)."
+    if " " in username:
+        return "USERNAME_ERR:Username cannot contain spaces."
+    with clients_lock:
+        if username in clients:
+            return "USERNAME_ERR:Username already taken."
+    return None
+
+
 def handle_client(client, username):
     print(f"[NEW CONNECTION] {username}")
 
@@ -36,6 +50,17 @@ def handle_client(client, username):
 
             if not message:
                 break
+
+            # /help
+            if message.strip() == "/help":
+                client.send(
+                    "Available commands:\n"
+                    "  /list        → show active users\n"
+                    "  /msg <user> <message> → private message\n"
+                    "  /help        → show this help\n"
+                    "  /exit        → disconnect".encode()
+                )
+                continue
 
             # /list
             if message.strip() == "/list":
@@ -53,10 +78,13 @@ def handle_client(client, username):
             if message.startswith("/msg"):
                 parts = message.split(" ", 2)
                 if len(parts) < 3:
-                    client.send("Invalid format. Use: /msg username message".encode())
+                    client.send("Invalid format. Use: /msg <username> <message>".encode())
                     continue
                 target_user = parts[1]
                 private_msg = parts[2]
+                if target_user == username:
+                    client.send("You cannot send a private message to yourself.".encode())
+                    continue
                 time = datetime.now().strftime("%H:%M")
                 with clients_lock:
                     target = clients.get(target_user)
@@ -65,6 +93,11 @@ def handle_client(client, username):
                     client.send(f"[{time}] [Private to {target_user}]: {private_msg}".encode())
                 else:
                     client.send(f"User '{target_user}' not found. Use /list to see active users.".encode())
+                continue
+
+            # unknown command
+            if message.strip().startswith("/"):
+                client.send("Unknown command. Type /help for available commands.".encode())
                 continue
 
             # normal message
@@ -78,26 +111,27 @@ def handle_client(client, username):
 
     print(f"[DISCONNECTED] {username}")
     with clients_lock:
-        del clients[username]
+        if username in clients:
+            del clients[username]
     client.close()
     broadcast(f"{username} left the chat")
 
 
 def setup_client(client, address):
     try:
-        client.send("USERNAME".encode())
-        username = client.recv(1024).decode().strip()
+        while True:
+            client.send("USERNAME".encode())
+            username = client.recv(1024).decode().strip()
 
-        if not username:
-            client.close()
-            return
+            error = validate_username(username)
+            if error:
+                client.send(error.encode())
+                # loop back and ask again
+                continue
 
-        with clients_lock:
-            if username in clients:
-                client.send("Username already taken. Please reconnect with a different username.".encode())
-                client.close()
-                return
-            clients[username] = client
+            with clients_lock:
+                clients[username] = client
+            break
 
         join_msg = f"{username} joined the chat"
         print(join_msg)
